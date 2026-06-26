@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+requests>=2.31
+python-dotenv>=1.0
+openai>=1.40
+
+# Outros LLMs (descomente se trocar de provider):
+# google-generativeai>=0.7
+# anthropic>=0.34

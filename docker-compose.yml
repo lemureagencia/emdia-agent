@@ -1,0 +1,22 @@
+services:
+  emdia-agent:
+    build: .
+    container_name: emdia-agent
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    # Se o seu VPS usa Traefik (como a Evolution costuma usar), descomente os labels
+    # abaixo e ajuste o domínio. Assim ele ganha HTTPS automático.
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.emdia-agent.rule=Host(`emdia-agent.dncorretora.online`)"
+    #   - "traefik.http.routers.emdia-agent.entrypoints=websecure"
+    #   - "traefik.http.routers.emdia-agent.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.emdia-agent.loadbalancer.server.port=8000"
+    # networks:
+    #   - traefik  # use a MESMA rede externa que a Evolution usa
+
+# networks:
+#   traefik:
+#     external: true
