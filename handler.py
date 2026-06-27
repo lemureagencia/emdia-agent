@@ -61,7 +61,9 @@ def _fmt_date(d: str | None) -> str:
 
 
 def _format_pending_list(items: list, tipo: str, period: str = "todos") -> str:
-    """tipo = 'income' (a receber) ou 'expense' (a pagar)."""
+    """tipo = 'income' (a receber) ou 'expense' (a pagar).
+    Separa em Vencidos e A vencer, para uma única resposta cobrir os dois.
+    """
     filtrados = [i for i in items if i.get("type") == tipo and _in_period(i.get("due_date"), period)]
     if not filtrados:
         venc = "" if period == "todos" else f" ({_periodo_label(period)})"
@@ -69,15 +71,30 @@ def _format_pending_list(items: list, tipo: str, period: str = "todos") -> str:
                 else f"✅ Nenhuma conta a pagar{venc}.")
     filtrados.sort(key=lambda i: i.get("due_date") or "9999")
     titulo = "📥 *Falta receber:*" if tipo == "income" else "📤 *Contas a pagar:*"
+    vencidos = [i for i in filtrados if i.get("overdue")]
+    a_vencer = [i for i in filtrados if not i.get("overdue")]
     linhas = [titulo, ""]
     total = 0.0
-    for i in filtrados:
-        total += float(i.get("amount", 0))
-        venc = _fmt_date(i.get("due_date"))
-        flag = "  ⚠️ _vencido_" if i.get("overdue") else ""
-        linhas.append(f"• *{i.get('description', '').strip()}*")
-        linhas.append(f"  {_brl(i.get('amount'))} · vence {venc}{flag}")
+
+    def _bloco(subtitulo: str | None, grupo: list, venceu: bool) -> None:
+        nonlocal total
+        if not grupo:
+            return
+        if subtitulo:
+            linhas.append(subtitulo)
+        verbo = "venceu" if venceu else "vence"
+        for i in grupo:
+            total += float(i.get("amount", 0))
+            linhas.append(f"• *{i.get('description', '').strip()}*")
+            linhas.append(f"  {_brl(i.get('amount'))} · {verbo} {_fmt_date(i.get('due_date'))}")
         linhas.append("")
+
+    # Se houver vencidos, mostra os dois blocos rotulados; senão, lista simples.
+    if vencidos:
+        _bloco("⚠️ _Vencidos:_", vencidos, venceu=True)
+        _bloco("📅 _A vencer:_", a_vencer, venceu=False)
+    else:
+        _bloco(None, a_vencer, venceu=False)
     linhas.append(f"*Total: {_brl(total)}*")
     return "\n".join(linhas)
 

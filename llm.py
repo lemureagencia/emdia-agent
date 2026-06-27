@@ -53,9 +53,9 @@ Regras:
   - "a_receber" => total PENDENTE a receber: "receita esperada", "quanto falta receber", "quanto tenho a receber".
   - "a_pagar" => total PENDENTE a pagar: "contas a pagar", "quanto falta pagar".
   - "vencidos" => só o TOTAL vencido/em atraso.
-  - "lista_vencidos" => quando pedir a LISTA do que está vencido/atrasado: "quais contas estão vencidas", "quem está em atraso", "o que venceu", "quais vencidos tenho", "quem deveria ter pagado". Use esta quando a pergunta sobre vencidos pedir "quais/quem/lista".
+  - "lista_receber" => LISTA de quem te deve / clientes a receber. JÁ separa os Vencidos dos A vencer numa resposta só. Use para: "quais clientes não pagaram", "quem me deve", "quem ainda não pagou", "quais clientes faltam pagar", "lista de recebimentos pendentes". IMPORTANTE: use esta MESMO que a pergunta também cite "vencidos", desde que peça os clientes/o que falta receber — ela já mostra os vencidos destacados.
+  - "lista_vencidos" => use APENAS quando quiser os vencidos de TUDO (a receber + a pagar juntos) ou explicitamente "só os vencidos", sem pedir a lista de clientes a receber.
   - "metas", "tudo" (resumo geral / "como tá minha grana").
-  - "lista_receber" => quando pedir a LISTA de quem falta receber (não necessariamente vencidos): "quais clientes não pagaram", "quem me deve", "quem ainda não pagou", "lista de recebimentos pendentes".
   - "lista_pagar" => quando pedir a LISTA de contas a pagar: "quais contas tenho que pagar", "o que falta pagar", "lista de contas a pagar".
   - Se pedir só o saldo da conta, use "saldo".
 - "periodo": se mencionar "próximo mês"/"mês que vem"/"mês seguinte" => "proximo_mes"; se "este mês"/"mês atual"/"esse mês" => "mes_atual"; se não mencionar tempo, omita (null).
@@ -143,10 +143,14 @@ def _rule_interpret(text: str) -> dict:
             if bal is not None:
                 return {"action": "definir_saldo", "balance": bal}
         if any(k in t for k in ["quais", "quem", "lista", "clientes", "nao pagaram", "não pagaram", "nao pagou", "não pagou", "me deve"]):
-            if "vencid" in t or "atrasad" in t or "em atraso" in t or "venceu" in t:
-                consulta = "lista_vencidos"
-            elif "a pagar" in t or "conta" in t or "boleto" in t or "fornecedor" in t:
+            # Intenção de "quem te deve" (a receber) vence: a lista já destaca os vencidos.
+            if any(k in t for k in ["cliente", "me deve", "nao pagaram", "não pagaram",
+                                    "nao pagou", "não pagou", "faltam pagar", "falta pagar", "receber"]):
+                consulta = "lista_receber"
+            elif "a pagar" in t or "boleto" in t or "fornecedor" in t or "conta" in t:
                 consulta = "lista_pagar"
+            elif "vencid" in t or "atrasad" in t or "em atraso" in t or "venceu" in t:
+                consulta = "lista_vencidos"
             else:
                 consulta = "lista_receber"
         elif "resumo" in t or "relat" in t or "grana" in t or "como" in t:
