@@ -1,7 +1,13 @@
 """Recebe (telefone, texto), interpreta e executa a ação no EmDia, devolvendo a resposta."""
 from datetime import date
+import re
 import llm
 import emdia
+
+
+def _fix_spacing(text: str) -> str:
+    """Garante no máximo 1 linha em branco entre blocos (LLMs tendem a usar 2+)."""
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 _PM_LABEL = {"pix": "Pix", "card": "Cartão", "cash": "Dinheiro"}
 _MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -225,6 +231,9 @@ def handle(phone: str, text: str) -> str | None:
         # reais (responde perguntas compostas e variadas). Se falhar (sem API
         # key/erro), cai no modo estruturado como rede de segurança.
         reply = llm.answer(text, history, _snapshot_text(s)) or _answer_structured(s, action)
+
+    if reply:
+        reply = _fix_spacing(reply)
 
     if reply:
         emdia.log_message(phone, "user", text)
