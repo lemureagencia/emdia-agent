@@ -185,10 +185,12 @@ def _snapshot_text(s: dict) -> str:
         for i in grupo:
             nome = (i.get("category") or "").strip()      # coluna "Nome" (cliente)
             desc = (i.get("description") or "").strip()    # o que foi vendido/pago
+            svc = (i.get("service_type") or "").strip()    # tipo de serviço/produto
             label = nome or desc or "(sem descrição)"
             detalhe = f" ({desc})" if (nome and desc) else ""
+            svc_info = f" [serviço: {svc}]" if svc else ""
             flag = " · VENCIDO" if i.get("overdue") else ""
-            linhas.append(f"  - {label}{detalhe} · {_brl(i.get('amount'))} · vence {_fmt_date(i.get('due_date'))}{flag}")
+            linhas.append(f"  - {label}{detalhe}{svc_info} · {_brl(i.get('amount'))} · vence {_fmt_date(i.get('due_date'))}{flag}")
         return linhas
 
     receber = [i for i in pend if i.get("type") == "income"]
@@ -211,7 +213,8 @@ def handle(phone: str, text: str) -> str | None:
 
     # Memória curta: histórico ANTES de processar a mensagem atual.
     history = emdia.recent_messages(phone)
-    action = llm.interpret(text, history)
+    descriptions = emdia.get_descriptions(phone)
+    action = llm.interpret(text, history, descriptions)
     a = action.get("action")
 
     if a in ("registrar", "definir_saldo"):
@@ -321,6 +324,7 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
         payment_method=action.get("payment_method"),
         status=status,
         due_date=action.get("due_date"),
+        service_type=action.get("service_type"),
     )
     if not r.get("success"):
         return "Não encontrei seu cadastro. Confirme seu número no EmDia."

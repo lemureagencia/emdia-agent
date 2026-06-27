@@ -22,7 +22,8 @@ def get_summary(phone: str) -> dict:
 
 def register(phone: str, type_: str, amount: float, description: str,
              category: str | None = None, payment_method: str | None = None,
-             status: str = "paid", due_date: str | None = None) -> dict:
+             status: str = "paid", due_date: str | None = None,
+             service_type: str | None = None) -> dict:
     return _rpc("agent_register_by_phone", {
         "p_phone": phone,
         "p_type": type_,
@@ -32,6 +33,7 @@ def register(phone: str, type_: str, amount: float, description: str,
         "p_payment_method": payment_method,
         "p_status": status,
         "p_due_date": due_date,
+        "p_service_type": service_type,
     })
 
 
@@ -44,6 +46,19 @@ def recent_messages(phone: str, limit: int = 8) -> list:
     try:
         return _rpc("agent_recent_messages", {"p_phone": phone, "p_limit": limit}) or []
     except Exception:  # noqa: BLE001 — memória é opcional, nunca quebra a resposta
+        return []
+
+
+def get_descriptions(phone: str) -> list:
+    """Descrições padrão do usuário (por telefone). Resiliente a falha."""
+    try:
+        result = _rpc("get_descriptions_by_phone", {"p_phone": phone})
+        if not result:
+            return []
+        if isinstance(result, list) and result and isinstance(result[0], dict):
+            return [r.get("text", "") for r in result if r.get("text")]
+        return [str(r) for r in result if r]
+    except Exception:  # noqa: BLE001
         return []
 
 
