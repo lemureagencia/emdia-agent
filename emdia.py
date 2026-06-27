@@ -36,3 +36,19 @@ def register(phone: str, type_: str, amount: float, description: str,
 
 def set_balance(phone: str, balance: float) -> dict:
     return _rpc("agent_set_balance_by_phone", {"p_phone": phone, "p_balance": balance})
+
+
+def recent_messages(phone: str, limit: int = 8) -> list:
+    """Últimas mensagens da conversa (ordem cronológica). Resiliente a falha."""
+    try:
+        return _rpc("agent_recent_messages", {"p_phone": phone, "p_limit": limit}) or []
+    except Exception:  # noqa: BLE001 — memória é opcional, nunca quebra a resposta
+        return []
+
+
+def log_message(phone: str, role: str, content: str) -> None:
+    """Grava uma mensagem (user/assistant) na memória. Resiliente a falha."""
+    try:
+        _rpc("agent_log_message", {"p_phone": phone, "p_role": role, "p_content": content})
+    except Exception:  # noqa: BLE001
+        pass

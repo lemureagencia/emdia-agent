@@ -4,7 +4,25 @@ import llm
 import emdia
 
 _PM_LABEL = {"pix": "Pix", "card": "Cartão", "cash": "Dinheiro"}
-_PERIODO_LABEL = {"mes_atual": "este mês", "proximo_mes": "próximo mês", "todos": "no total"}
+_MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+          "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def _month_name(offset: int = 0) -> str:
+    """Nome do mês corrente + offset (ex.: 'junho'; 'janeiro/2027' se virar o ano)."""
+    today = date.today()
+    idx = (today.month - 1) + offset
+    y = today.year + idx // 12
+    nome = _MESES[idx % 12]
+    return nome if y == today.year else f"{nome}/{y}"
+
+
+def _periodo_label(period: str | None) -> str:
+    if period == "mes_atual":
+        return _month_name(0)
+    if period == "proximo_mes":
+        return _month_name(1)
+    return "no total"
 
 
 def _month_str(offset: int) -> str:
@@ -46,7 +64,7 @@ def _format_pending_list(items: list, tipo: str, period: str = "todos") -> str:
     """tipo = 'income' (a receber) ou 'expense' (a pagar)."""
     filtrados = [i for i in items if i.get("type") == tipo and _in_period(i.get("due_date"), period)]
     if not filtrados:
-        venc = "" if period == "todos" else f" ({_PERIODO_LABEL.get(period, '')})"
+        venc = "" if period == "todos" else f" ({_periodo_label(period)})"
         return (f"✅ Nenhum recebimento em aberto{venc}." if tipo == "income"
                 else f"✅ Nenhuma conta a pagar{venc}.")
     filtrados.sort(key=lambda i: i.get("due_date") or "9999")
@@ -75,11 +93,12 @@ def _format_summary(s: dict) -> str:
     fin = s.get("finance", {}) or {}
     nome = (s.get("name") or "").strip()
     linhas = [f"📊 *Resumo{(' — ' + nome) if nome else ''}*", ""]
+    mes = _month_name(0)
     linhas.append(f"💰 Saldo na conta: *{_brl(s.get('account_balance', 0))}*")
-    linhas.append(f"📥 Entradas no mês (recebido): *{_brl(fin.get('received_month', 0))}*")
-    linhas.append(f"📤 Saídas no mês (pago): *{_brl(fin.get('paid_month', 0))}*")
-    linhas.append(f"⏳ A receber (mês): *{_brl(fin.get('expected_income', 0))}*")
-    linhas.append(f"⏳ A pagar (mês): *{_brl(fin.get('bills_to_pay', 0))}*")
+    linhas.append(f"📥 Entradas de {mes} (recebido): *{_brl(fin.get('received_month', 0))}*")
+    linhas.append(f"📤 Saídas de {mes} (pago): *{_brl(fin.get('paid_month', 0))}*")
+    linhas.append(f"⏳ A receber ({mes}): *{_brl(fin.get('expected_income', 0))}*")
+    linhas.append(f"⏳ A pagar ({mes}): *{_brl(fin.get('bills_to_pay', 0))}*")
     overdue = fin.get("overdue_count", 0)
     if overdue:
         total_venc = float(fin.get("income_overdue", 0)) + float(fin.get("expense_overdue", 0))
@@ -100,7 +119,18 @@ def handle(phone: str, text: str) -> str | None:
     if not s.get("found"):
         return None
 
-    action = llm.interpret(text)
+    # Memória curta: recupera o histórico ANTES de processar a mensagem atual,
+    # para o LLM resolver continuações ("e a receber?", "me refiro ao próximo mês").
+    history = emdia.recent_messages(phone)
+    reply = _route(phone, text, s, history)
+    if reply:
+        emdia.log_message(phone, "user", text)
+        emdia.log_message(phone, "assistant", reply)
+    return reply
+
+
+def _route(phone: str, text: str, s: dict, history: list) -> str | None:
+    action = llm.interpret(text, history)
     a = action.get("action")
 
     if a == "consultar":
@@ -113,27 +143,27 @@ def handle(phone: str, text: str) -> str | None:
         if consulta == "entradas":
             # ENTRADAS = o que JÁ entrou. Mostra também o que ainda falta entrar.
             if periodo == "proximo_mes":
-                return f"📥 A receber (próximo mês): *{_brl(_period_total(pending, 'income', 'proximo_mes'))}*"
+                return f"📥 A receber ({_month_name(1)}): *{_brl(_period_total(pending, 'income', 'proximo_mes'))}*"
             recebido = fin.get("received_month", 0)
             a_receber = fin.get("expected_income", 0)
-            return (f"📥 *Entradas (este mês)*\n"
+            return (f"📥 *Entradas de {_month_name(0)}*\n"
                     f"• Já recebido: *{_brl(recebido)}*\n"
                     f"• Ainda a receber: *{_brl(a_receber)}*")
         if consulta == "saidas":
             # SAÍDAS = o que JÁ saiu. Mostra também o que ainda falta pagar.
             if periodo == "proximo_mes":
-                return f"📤 A pagar (próximo mês): *{_brl(_period_total(pending, 'expense', 'proximo_mes'))}*"
+                return f"📤 A pagar ({_month_name(1)}): *{_brl(_period_total(pending, 'expense', 'proximo_mes'))}*"
             pago = fin.get("paid_month", 0)
             a_pagar = fin.get("bills_to_pay", 0)
-            return (f"📤 *Saídas (este mês)*\n"
+            return (f"📤 *Saídas de {_month_name(0)}*\n"
                     f"• Já pago: *{_brl(pago)}*\n"
                     f"• Ainda a pagar: *{_brl(a_pagar)}*")
         if consulta == "a_receber":
             p = periodo or "mes_atual"
-            return f"📥 A receber ({_PERIODO_LABEL[p]}): *{_brl(_period_total(pending, 'income', p))}*"
+            return f"📥 A receber ({_periodo_label(p)}): *{_brl(_period_total(pending, 'income', p))}*"
         if consulta == "a_pagar":
             p = periodo or "mes_atual"
-            return f"📤 A pagar ({_PERIODO_LABEL[p]}): *{_brl(_period_total(pending, 'expense', p))}*"
+            return f"📤 A pagar ({_periodo_label(p)}): *{_brl(_period_total(pending, 'expense', p))}*"
         if consulta == "lista_receber":
             return _format_pending_list(pending, "income", periodo or "todos")
         if consulta == "lista_pagar":

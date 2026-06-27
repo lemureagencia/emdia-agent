@@ -62,6 +62,12 @@ Regras:
 - due_date: se mencionar só o dia (ex.: "dia 15"), use o PRÓXIMO mês em que esse dia ainda não passou, com base na data de hoje. Se não houver data, omita o campo.
 - Use null (não a string "null") para campos sem valor, ou simplesmente omita-os.
 - Não invente valores. Se não entender, action=ajuda.
+
+CONTEXTO / HISTÓRICO:
+- As mensagens anteriores da conversa são fornecidas. Use-as para entender perguntas curtas de continuação.
+- Ex.: se a última pergunta foi sobre "próximo mês" e o usuário diz só "e a receber?", responda consulta=a_receber com periodo=proximo_mes (herda o período do contexto).
+- Se o usuário CORRIGIR o período (ex.: "me refiro ao próximo mês", "era pro mês que vem"), REFAÇA a última consulta com o novo período, mantendo o mesmo tipo de consulta da pergunta anterior.
+- Se a continuação não tiver contexto claro, trate como pergunta nova normalmente.
 Responda só o JSON."""
 
 
@@ -197,47 +203,61 @@ def _extract_json(s: str) -> dict:
     raise ValueError("sem JSON")
 
 
-def _openai_interpret(text: str) -> dict:
+def _history_msgs(history: list | None) -> list:
+    """Converte o histórico do banco em mensagens role/content válidas."""
+    out = []
+    for h in (history or []):
+        role = h.get("role")
+        content = h.get("content")
+        if role in ("user", "assistant") and content:
+            out.append({"role": role, "content": str(content)})
+    return out
+
+
+def _openai_compat_interpret(text: str, history: list | None, base_url: str | None, default_model: str) -> dict:
     from openai import OpenAI
-    client = OpenAI(api_key=config.LLM_API_KEY)
+    client = OpenAI(api_key=config.LLM_API_KEY, base_url=base_url) if base_url else OpenAI(api_key=config.LLM_API_KEY)
+    messages = [{"role": "system", "content": _system_prompt()}]
+    messages += _history_msgs(history)
+    messages.append({"role": "user", "content": text})
     r = client.chat.completions.create(
-        model=config.LLM_MODEL or "gpt-4o-mini",
-        messages=[{"role": "system", "content": _system_prompt()}, {"role": "user", "content": text}],
+        model=config.LLM_MODEL or default_model,
+        messages=messages,
         response_format={"type": "json_object"},
         temperature=0,
     )
     return json.loads(r.choices[0].message.content)
 
 
-def _groq_interpret(text: str) -> dict:
+def _openai_interpret(text: str, history: list | None = None) -> dict:
+    return _openai_compat_interpret(text, history, None, "gpt-4o-mini")
+
+
+def _groq_interpret(text: str, history: list | None = None) -> dict:
     # Groq é compatível com a API da OpenAI — reusa o SDK apontando o base_url.
-    from openai import OpenAI
-    client = OpenAI(api_key=config.LLM_API_KEY, base_url="https://api.groq.com/openai/v1")
-    r = client.chat.completions.create(
-        model=config.LLM_MODEL or "llama-3.3-70b-versatile",
-        messages=[{"role": "system", "content": _system_prompt()}, {"role": "user", "content": text}],
-        response_format={"type": "json_object"},
-        temperature=0,
-    )
-    return json.loads(r.choices[0].message.content)
+    return _openai_compat_interpret(text, history, "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")
 
 
-def _gemini_interpret(text: str) -> dict:
+def _gemini_interpret(text: str, history: list | None = None) -> dict:
     import google.generativeai as genai
     genai.configure(api_key=config.LLM_API_KEY)
     model = genai.GenerativeModel(config.LLM_MODEL or "gemini-1.5-flash", system_instruction=_system_prompt())
-    r = model.generate_content(text, generation_config={"response_mime_type": "application/json", "temperature": 0})
+    chat_hist = [{"role": ("model" if h["role"] == "assistant" else "user"), "parts": [h["content"]]}
+                 for h in _history_msgs(history)]
+    chat = model.start_chat(history=chat_hist)
+    r = chat.send_message(text, generation_config={"response_mime_type": "application/json", "temperature": 0})
     return _extract_json(r.text)
 
 
-def _anthropic_interpret(text: str) -> dict:
+def _anthropic_interpret(text: str, history: list | None = None) -> dict:
     import anthropic
     client = anthropic.Anthropic(api_key=config.LLM_API_KEY)
+    messages = _history_msgs(history) + [{"role": "user", "content": text}]
     r = client.messages.create(
         model=config.LLM_MODEL or "claude-haiku-4-5-20251001",
         max_tokens=300,
         system=_system_prompt(),
-        messages=[{"role": "user", "content": text}],
+        messages=messages,
     )
     return _extract_json(r.content[0].text)
 
@@ -250,11 +270,11 @@ _PROVIDERS = {
 }
 
 
-def interpret(text: str) -> dict:
+def interpret(text: str, history: list | None = None) -> dict:
     fn = _PROVIDERS.get(config.LLM_PROVIDER)
     if fn:
         try:
-            return _sanitize(fn(text))
+            return _sanitize(fn(text, history))
         except Exception as e:  # noqa: BLE001
             print(f"[llm:{config.LLM_PROVIDER}:erro] {e} — caindo no parser por regras")
     return _rule_interpret(text)
