@@ -25,3 +25,6 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "rule").lower()
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
+
+# Kiwify: token de segurança do webhook (definir no Easypanel como KIWIFY_WEBHOOK_TOKEN)
+KIWIFY_WEBHOOK_TOKEN = os.getenv("KIWIFY_WEBHOOK_TOKEN", "")

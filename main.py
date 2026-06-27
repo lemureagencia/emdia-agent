@@ -4,9 +4,10 @@ Rodar:  uvicorn main:app --reload --port 8000
 Testar: POST /test  {"phone": "5511...", "text": "paguei 150 de luz"}
 """
 import sys
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 import config
 import handler
+import kiwify
 
 # Escolhe a camada de transporte do WhatsApp
 if config.TRANSPORT == "zernio":
@@ -57,6 +58,16 @@ async def webhook(req: Request):
         return {"ok": True}
     transport.send(reply_to or phone, reply)
     return {"ok": True}
+
+
+@app.post("/webhook/kiwify")
+async def webhook_kiwify(req: Request):
+    """Recebe eventos do Kiwify e atualiza o plano do usuário no EmDia."""
+    token = req.query_params.get("token") or ""
+    if token != config.KIWIFY_WEBHOOK_TOKEN:
+        raise HTTPException(status_code=403, detail="token inválido")
+    body = await req.json()
+    return kiwify.handle_webhook(body)
 
 
 @app.post("/test")
