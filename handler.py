@@ -181,9 +181,15 @@ def _snapshot_text(s: dict) -> str:
         grupo = sorted(grupo, key=lambda x: x.get("due_date") or "9999")[:40]
         if not grupo:
             return ["  (nenhum)"]
-        return [f"  - {i.get('description', '').strip()} · {_brl(i.get('amount'))} · "
-                f"vence {_fmt_date(i.get('due_date'))}{' · VENCIDO' if i.get('overdue') else ''}"
-                for i in grupo]
+        linhas = []
+        for i in grupo:
+            nome = (i.get("category") or "").strip()      # coluna "Nome" (cliente)
+            desc = (i.get("description") or "").strip()    # o que foi vendido/pago
+            label = nome or desc or "(sem descrição)"
+            detalhe = f" ({desc})" if (nome and desc) else ""
+            flag = " · VENCIDO" if i.get("overdue") else ""
+            linhas.append(f"  - {label}{detalhe} · {_brl(i.get('amount'))} · vence {_fmt_date(i.get('due_date'))}{flag}")
+        return linhas
 
     receber = [i for i in pend if i.get("type") == "income"]
     pagar = [i for i in pend if i.get("type") == "expense"]
@@ -311,6 +317,7 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
         type_=type_,
         amount=float(amount),
         description=action.get("description") or text[:80],
+        category=action.get("name"),  # nome do cliente -> coluna "Nome" no app
         payment_method=action.get("payment_method"),
         status=status,
         due_date=action.get("due_date"),

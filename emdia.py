@@ -21,13 +21,14 @@ def get_summary(phone: str) -> dict:
 
 
 def register(phone: str, type_: str, amount: float, description: str,
-             payment_method: str | None = None, status: str = "paid",
-             due_date: str | None = None) -> dict:
+             category: str | None = None, payment_method: str | None = None,
+             status: str = "paid", due_date: str | None = None) -> dict:
     return _rpc("agent_register_by_phone", {
         "p_phone": phone,
         "p_type": type_,
         "p_amount": amount,
         "p_description": description,
+        "p_category": category,  # coluna "Nome" (cliente) no app
         "p_payment_method": payment_method,
         "p_status": status,
         "p_due_date": due_date,

@@ -27,7 +27,8 @@ sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um J
 {{"action": "registrar|consultar|definir_saldo|ajuda",
  "type": "income|expense",
  "amount": number,
- "description": "texto curto",
+ "name": "nome do cliente, se houver",
+ "description": "o que foi vendido/pago",
  "status": "paid|pending",
  "payment_method": "pix|card|cash",
  "due_date": "YYYY-MM-DD",
@@ -44,6 +45,8 @@ Conceito importante (NÃO confundir):
 Regras:
 - "paguei", "gastei", "comprei" => action=registrar, type=expense, status=paid.
 - "recebi", "entrou", "caiu", "ganhei" => action=registrar, type=income, status=paid.
+- "cadastre o cliente X", "registre o cliente X que vai me pagar" => action=registrar, type=income, name=X (e status=pending se for um pagamento futuro / com data).
+- Em registrar, SEPARE nome e descrição: "name" = nome do cliente/pessoa/fornecedor citado (ex.: "recebi 2000 da Juliana", "cadastre o cliente Juliana Chieppe" => name="Juliana" / "Juliana Chieppe"). "description" = o que foi vendido/pago, SEM o nome (ex.: "serviço de vídeos", "conta de luz"). Se não houver nome, omita "name".
 - "vou pagar", "tenho que pagar", "conta a pagar", "a receber", "vence" => status=pending (e due_date se houver data).
 - "saldo", "quanto tenho", "quanto devo", "resumo", "relatório", "como ta" => action=consultar.
 - Em consultar, preencha "consulta" com o que foi pedido:
