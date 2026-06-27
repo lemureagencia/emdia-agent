@@ -286,3 +286,56 @@ def interpret(text: str, history: list | None = None) -> dict:
         except Exception as e:  # noqa: BLE001
             print(f"[llm:{config.LLM_PROVIDER}:erro] {e} — caindo no parser por regras")
     return _rule_interpret(text)
+
+
+# ---------------------------------------------------------------- modo inteligente
+_ANSWER_SYSTEM = """Você é o assistente financeiro do EmDia, atendendo pelo WhatsApp. Hoje é {hoje}.
+Responda em português (BR), de forma curta, clara e amigável.
+
+REGRAS IMPORTANTES:
+- Use SOMENTE os números e itens fornecidos no bloco DADOS abaixo. NUNCA invente, calcule ou estime valores novos. Se um total pedido não estiver nos DADOS, diga que não tem esse número — não chute.
+- Responda APENAS o que foi perguntado. Se o usuário pediu DUAS coisas (ex.: contas a pagar E clientes que faltam pagar), responda as DUAS, em seções separadas.
+- Não confunda os lados: "clientes que faltam pagar / quem me deve / a receber" = ITENS A RECEBER. "contas a pagar / o que eu devo / boletos / despesas" = CONTAS A PAGAR.
+- Destaque os itens marcados como VENCIDO.
+- Use o histórico da conversa para entender perguntas de continuação ("e a receber?", "me refiro ao próximo mês").
+- Formato WhatsApp: *negrito* com UM asterisco só. Emojis com moderação (📥 a receber, 📤 a pagar, ⚠️ vencido, 💰 saldo, 🎯 metas).
+- Copie os valores monetários exatamente como aparecem nos DADOS (ex.: R$ 1.950,00).
+- Seja objetivo: não repita a pergunta nem dê conselhos que não foram pedidos.
+- Se a pergunta não tiver relação com as finanças do cliente, explique em uma linha o que você faz.
+
+DADOS:
+{dados}"""
+
+
+def answer(text: str, history: list | None, dados: str) -> str | None:
+    """Modo inteligente: o LLM compõe a resposta a partir dos DADOS reais.
+    Retorna None se não houver provider LLM ou em caso de erro (cai no estruturado).
+    """
+    provider = config.LLM_PROVIDER
+    system = _ANSWER_SYSTEM.format(hoje=date.today().isoformat(), dados=dados)
+    try:
+        if provider in ("openai", "groq"):
+            from openai import OpenAI
+            base = "https://api.groq.com/openai/v1" if provider == "groq" else None
+            client = OpenAI(api_key=config.LLM_API_KEY, base_url=base) if base else OpenAI(api_key=config.LLM_API_KEY)
+            messages = [{"role": "system", "content": system}] + _history_msgs(history) + [{"role": "user", "content": text}]
+            r = client.chat.completions.create(
+                model=config.LLM_MODEL or ("llama-3.3-70b-versatile" if provider == "groq" else "gpt-4o-mini"),
+                messages=messages,
+                temperature=0,
+            )
+            return (r.choices[0].message.content or "").strip() or None
+        if provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=config.LLM_API_KEY)
+            messages = _history_msgs(history) + [{"role": "user", "content": text}]
+            r = client.messages.create(
+                model=config.LLM_MODEL or "claude-haiku-4-5-20251001",
+                max_tokens=700,
+                system=system,
+                messages=messages,
+            )
+            return (r.content[0].text or "").strip() or None
+    except Exception as e:  # noqa: BLE001
+        print(f"[llm:answer:erro] {e} — caindo na resposta estruturada")
+    return None
