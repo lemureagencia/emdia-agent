@@ -32,7 +32,7 @@ sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um J
  "payment_method": "pix|card|cash",
  "due_date": "YYYY-MM-DD",
  "balance": number,
- "consulta": "saldo|entradas|saidas|a_receber|a_pagar|vencidos|metas|tudo|lista_receber|lista_pagar",
+ "consulta": "saldo|entradas|saidas|a_receber|a_pagar|vencidos|lista_vencidos|metas|tudo|lista_receber|lista_pagar",
  "periodo": "mes_atual|proximo_mes|todos"}}
 
 Conceito importante (NÃO confundir):
@@ -52,8 +52,10 @@ Regras:
   - "saidas" => quanto JÁ saiu/gastou no período: "minhas saídas/despesas pagas", "quanto gastei", "quanto saiu".
   - "a_receber" => total PENDENTE a receber: "receita esperada", "quanto falta receber", "quanto tenho a receber".
   - "a_pagar" => total PENDENTE a pagar: "contas a pagar", "quanto falta pagar".
-  - "vencidos", "metas", "tudo" (resumo geral / "como tá minha grana").
-  - "lista_receber" => quando pedir a LISTA de quem falta receber: "quais clientes não pagaram", "quem me deve", "quem ainda não pagou", "lista de recebimentos pendentes".
+  - "vencidos" => só o TOTAL vencido/em atraso.
+  - "lista_vencidos" => quando pedir a LISTA do que está vencido/atrasado: "quais contas estão vencidas", "quem está em atraso", "o que venceu", "quais vencidos tenho", "quem deveria ter pagado". Use esta quando a pergunta sobre vencidos pedir "quais/quem/lista".
+  - "metas", "tudo" (resumo geral / "como tá minha grana").
+  - "lista_receber" => quando pedir a LISTA de quem falta receber (não necessariamente vencidos): "quais clientes não pagaram", "quem me deve", "quem ainda não pagou", "lista de recebimentos pendentes".
   - "lista_pagar" => quando pedir a LISTA de contas a pagar: "quais contas tenho que pagar", "o que falta pagar", "lista de contas a pagar".
   - Se pedir só o saldo da conta, use "saldo".
 - "periodo": se mencionar "próximo mês"/"mês que vem"/"mês seguinte" => "proximo_mes"; se "este mês"/"mês atual"/"esse mês" => "mes_atual"; se não mencionar tempo, omita (null).
@@ -133,7 +135,7 @@ def _rule_interpret(text: str) -> dict:
         "quanto gastei", "quanto saiu", "resumo", "relatorio", "relatório",
         "como estou", "como ta", "grana", "a receber", "a pagar", "receita",
         "entrada", "despesa", "saida", "saída", "metas", "vencid",
-        "clientes", "me deve", "pagaram", "pagou",
+        "clientes", "me deve", "pagaram", "pagou", "atrasad", "em atraso", "venceu",
     ])
     if consulta_gate:
         if any(k in t for k in ["meu saldo é", "meu saldo e ", "ajusta", "saldo para", "saldo agora", "saldo hoje é"]):
@@ -141,7 +143,9 @@ def _rule_interpret(text: str) -> dict:
             if bal is not None:
                 return {"action": "definir_saldo", "balance": bal}
         if any(k in t for k in ["quais", "quem", "lista", "clientes", "nao pagaram", "não pagaram", "nao pagou", "não pagou", "me deve"]):
-            if "a pagar" in t or "conta" in t or "boleto" in t or "fornecedor" in t:
+            if "vencid" in t or "atrasad" in t or "em atraso" in t or "venceu" in t:
+                consulta = "lista_vencidos"
+            elif "a pagar" in t or "conta" in t or "boleto" in t or "fornecedor" in t:
                 consulta = "lista_pagar"
             else:
                 consulta = "lista_receber"

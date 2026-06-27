@@ -82,6 +82,34 @@ def _format_pending_list(items: list, tipo: str, period: str = "todos") -> str:
     return "\n".join(linhas)
 
 
+def _format_overdue_list(items: list) -> str:
+    """Lista os itens VENCIDOS (a receber e a pagar), com nome, valor e data."""
+    venc = [i for i in items if i.get("overdue")]
+    if not venc:
+        return "✅ Nenhuma conta vencida. Tudo em dia! 🎉"
+    venc.sort(key=lambda i: i.get("due_date") or "9999")
+    receber = [i for i in venc if i.get("type") == "income"]
+    pagar = [i for i in venc if i.get("type") == "expense"]
+    linhas = ["⚠️ *Vencidos*", ""]
+    total = 0.0
+
+    def _bloco(titulo: str, grupo: list) -> None:
+        nonlocal total
+        if not grupo:
+            return
+        linhas.append(titulo)
+        for i in grupo:
+            total += float(i.get("amount", 0))
+            linhas.append(f"• *{i.get('description', '').strip()}*")
+            linhas.append(f"  {_brl(i.get('amount'))} · venceu {_fmt_date(i.get('due_date'))}")
+        linhas.append("")
+
+    _bloco("📥 *Falta receber (vencido):*", receber)
+    _bloco("📤 *Contas a pagar (vencido):*", pagar)
+    linhas.append(f"*Total vencido: {_brl(total)}*")
+    return "\n".join(linhas)
+
+
 def _brl(v) -> str:
     try:
         return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -168,6 +196,8 @@ def _route(phone: str, text: str, s: dict, history: list) -> str | None:
             return _format_pending_list(pending, "income", periodo or "todos")
         if consulta == "lista_pagar":
             return _format_pending_list(pending, "expense", periodo or "todos")
+        if consulta == "lista_vencidos":
+            return _format_overdue_list(pending)
         if consulta == "vencidos":
             total_venc = float(fin.get("income_overdue", 0)) + float(fin.get("expense_overdue", 0))
             return f"⚠️ Vencidos: *{_brl(total_venc)}* ({fin.get('overdue_count', 0)} em atraso)"
