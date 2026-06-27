@@ -76,8 +76,10 @@ def _format_summary(s: dict) -> str:
     nome = (s.get("name") or "").strip()
     linhas = [f"📊 *Resumo{(' — ' + nome) if nome else ''}*", ""]
     linhas.append(f"💰 Saldo na conta: *{_brl(s.get('account_balance', 0))}*")
-    linhas.append(f"📥 A receber (mês): *{_brl(fin.get('expected_income', 0))}*")
-    linhas.append(f"📤 A pagar (mês): *{_brl(fin.get('bills_to_pay', 0))}*")
+    linhas.append(f"📥 Entradas no mês (recebido): *{_brl(fin.get('received_month', 0))}*")
+    linhas.append(f"📤 Saídas no mês (pago): *{_brl(fin.get('paid_month', 0))}*")
+    linhas.append(f"⏳ A receber (mês): *{_brl(fin.get('expected_income', 0))}*")
+    linhas.append(f"⏳ A pagar (mês): *{_brl(fin.get('bills_to_pay', 0))}*")
     overdue = fin.get("overdue_count", 0)
     if overdue:
         total_venc = float(fin.get("income_overdue", 0)) + float(fin.get("expense_overdue", 0))
@@ -108,6 +110,24 @@ def handle(phone: str, text: str) -> str | None:
         periodo = action.get("periodo")
         if consulta == "saldo":
             return f"💰 Saldo na conta: *{_brl(s.get('account_balance', 0))}*"
+        if consulta == "entradas":
+            # ENTRADAS = o que JÁ entrou. Mostra também o que ainda falta entrar.
+            if periodo == "proximo_mes":
+                return f"📥 A receber (próximo mês): *{_brl(_period_total(pending, 'income', 'proximo_mes'))}*"
+            recebido = fin.get("received_month", 0)
+            a_receber = fin.get("expected_income", 0)
+            return (f"📥 *Entradas (este mês)*\n"
+                    f"• Já recebido: *{_brl(recebido)}*\n"
+                    f"• Ainda a receber: *{_brl(a_receber)}*")
+        if consulta == "saidas":
+            # SAÍDAS = o que JÁ saiu. Mostra também o que ainda falta pagar.
+            if periodo == "proximo_mes":
+                return f"📤 A pagar (próximo mês): *{_brl(_period_total(pending, 'expense', 'proximo_mes'))}*"
+            pago = fin.get("paid_month", 0)
+            a_pagar = fin.get("bills_to_pay", 0)
+            return (f"📤 *Saídas (este mês)*\n"
+                    f"• Já pago: *{_brl(pago)}*\n"
+                    f"• Ainda a pagar: *{_brl(a_pagar)}*")
         if consulta == "a_receber":
             p = periodo or "mes_atual"
             return f"📥 A receber ({_PERIODO_LABEL[p]}): *{_brl(_period_total(pending, 'income', p))}*"
