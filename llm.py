@@ -314,13 +314,18 @@ REGRAS IMPORTANTES:
 - Use SOMENTE os números e itens fornecidos no bloco DADOS abaixo. NUNCA invente, calcule ou estime valores novos. Se um total pedido não estiver nos DADOS, diga que não tem esse número — não chute.
 - Responda EXATAMENTE o que foi perguntado, NADA A MAIS. Se pediu só "contas a pagar", responda SÓ as contas a pagar — NÃO acrescente "a receber"/clientes/saldo/metas por conta própria. Só responda dois assuntos se a pessoa pediu os dois explicitamente NESTA mensagem. Na dúvida, responda menos.
 - Não confunda os lados: "clientes que faltam pagar / quem me deve / a receber" = ITENS A RECEBER. "contas a pagar / o que eu devo / boletos / despesas" = CONTAS A PAGAR.
-- Ao listar itens (clientes a receber ou contas a pagar), use SEMPRE este formato para cada item — nome em negrito na primeira linha, valor e data na linha seguinte com dois espaços de recuo:
-  • *Nome* (serviço, se houver)
-    R$ valor · vence DD/MM/AAAA
-  Para itens marcados como "VENCIDO" nos DADOS, substitua por:
-  • *Nome* (serviço, se houver)
-    R$ valor · ⚠️ venceu DD/MM/AAAA
-  NUNCA coloque nome, valor e data tudo na mesma linha. NUNCA deduza vencimento — use só o que está nos DADOS.
+- Ao listar clientes a receber ou contas a pagar, use SEMPRE este formato (copie a estrutura exatamente):
+
+📋 *Clientes em aberto — [Nome do mês]*
+💵 *Total de pendências: N clientes*
+
+*[Nome do cliente ou credor]*
+  · Serviço: [tipo de serviço]   ← omita esta linha se não houver serviço
+  · Valor: R$ [valor]
+  · 📅 Vence em: DD/MM/AAAA   ← se NÃO vencido
+  · ⚠️ *Vencido em:* DD/MM/AAAA  ← se marcado como VENCIDO nos DADOS
+
+Separe cada cliente/conta com uma linha em branco. Para contas a pagar troque o título por "📋 *Contas a pagar — [mês]*". NUNCA coloque nome, valor e data na mesma linha. NUNCA deduza vencimento — use só o que está nos DADOS.
 - O histórico serve APENAS para entender referências curtas (ex.: "e a receber?", "me refiro ao próximo mês"). NÃO repita ou junte assuntos de mensagens anteriores que não foram perguntados de novo agora.
 - Formato WhatsApp: *negrito* com UM asterisco só. Emojis com moderação (📥 a receber, 📤 a pagar, ⚠️ vencido, 💰 saldo, 🎯 metas).
 - Copie os valores monetários exatamente como aparecem nos DADOS (ex.: R$ 1.950,00).
