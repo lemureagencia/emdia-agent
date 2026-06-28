@@ -40,8 +40,19 @@ async def webhook(req: Request):
     body = await req.json()
     phone, text, msg_id, reply_to, audio_url = transport.parse_webhook(body)
 
-    # Áudio sem texto: transcreve antes de continuar
-    if phone and not text and audio_url:
+    if not phone:
+        return {"ok": True}
+
+    # Dedup antes de qualquer processamento (evita transcrever o mesmo áudio duas vezes)
+    if msg_id:
+        if msg_id in _seen_ids:
+            return {"ok": True}
+        _seen_ids.add(msg_id)
+        if len(_seen_ids) > 2000:
+            _seen_ids.clear()
+
+    # Áudio sem texto: transcreve e usa o transcript como texto
+    if not text and audio_url:
         print(f"[audio] {phone}: transcrevendo {audio_url[:80]}")
         dl_headers = getattr(transport, "get_download_headers", lambda: {})()
         text = transcribe.transcribe_audio(audio_url, dl_headers)
@@ -50,14 +61,8 @@ async def webhook(req: Request):
         else:
             print(f"[audio] falha na transcrição — ignorando mensagem")
 
-    if not (phone and text):
+    if not text:
         return {"ok": True}
-    if msg_id:
-        if msg_id in _seen_ids:
-            return {"ok": True}
-        _seen_ids.add(msg_id)
-        if len(_seen_ids) > 2000:
-            _seen_ids.clear()
 
     print(f"[msg] {phone}: {text}")
     try:
