@@ -90,23 +90,17 @@ def parse_webhook(body: dict) -> tuple[str | None, str | None, str | None, str |
     if len(phone) < 8:
         phone = raw or None
 
-    # Detecta mensagem de áudio (sem texto)
+    # Detecta mensagem de áudio via lista de attachments (estrutura real da Zernio)
     audio_url = None
     if not text:
-        msg_type = (msg.get("type") or msg.get("messageType") or "").lower()
-        is_audio = "audio" in msg_type or "voice" in msg_type or "ptt" in msg_type
-        if is_audio or not text:
-            audio_url = (
-                msg.get("mediaUrl")
-                or msg.get("media_url")
-                or msg.get("audioUrl")
-                or msg.get("fileUrl")
-                or msg.get("url")
-                or (msg.get("media") or {}).get("url")
-                or (msg.get("attachment") or {}).get("url")
-            )
-        if is_audio and not audio_url:
-            # Loga o body completo para diagnóstico (primeira vez que aparece um áudio)
-            print(f"[zernio:audio] campo de URL não encontrado — body: {body}")
+        for att in (msg.get("attachments") or []):
+            if "audio" in (att.get("type") or "").lower():
+                audio_url = att.get("url")
+                break
 
     return (phone or None), (text.strip() if text else None), msg_id, conv, (audio_url or None)
+
+
+def get_download_headers() -> dict:
+    """Headers necessários para baixar mídia protegida da API Zernio."""
+    return {"Authorization": f"Bearer {config.ZERNIO_API_KEY}"} if config.ZERNIO_API_KEY else {}
