@@ -32,10 +32,10 @@ def send(reply_to: str, text: str) -> None:
     send_text(reply_to, text)
 
 
-def parse_webhook(body: dict) -> tuple[str | None, str | None, str | None, str | None]:
-    """Interface unificada: (phone, text, msg_id, reply_to=phone)."""
+def parse_webhook(body: dict) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Interface unificada: (phone, text, msg_id, reply_to=phone, audio_url=None)."""
     phone, text, msg_id = extract_message(body)
-    return phone, text, msg_id, phone
+    return phone, text, msg_id, phone, None
 
 
 def extract_message(body: dict) -> tuple[str | None, str | None, str | None]:

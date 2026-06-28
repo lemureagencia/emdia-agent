@@ -28,3 +28,6 @@ LLM_MODEL = os.getenv("LLM_MODEL", "")
 
 # Kiwify: token de segurança do webhook (definir no Easypanel como KIWIFY_WEBHOOK_TOKEN)
 KIWIFY_WEBHOOK_TOKEN = os.getenv("KIWIFY_WEBHOOK_TOKEN", "")
+
+# Groq Whisper (transcrição de áudio): usa a mesma chave do LLM quando provider=groq
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", LLM_API_KEY if LLM_PROVIDER == "groq" else "")

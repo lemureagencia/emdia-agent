@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, HTTPException
 import config
 import handler
 import kiwify
+import transcribe
 
 # Escolhe a camada de transporte do WhatsApp
 if config.TRANSPORT == "zernio":
@@ -37,7 +38,17 @@ _seen_ids: set[str] = set()
 @app.post("/webhook")
 async def webhook(req: Request):
     body = await req.json()
-    phone, text, msg_id, reply_to = transport.parse_webhook(body)
+    phone, text, msg_id, reply_to, audio_url = transport.parse_webhook(body)
+
+    # Áudio sem texto: tenta transcrever antes de continuar
+    if phone and not text and audio_url:
+        print(f"[audio] {phone}: transcrevendo {audio_url[:80]}")
+        text = transcribe.transcribe_audio(audio_url)
+        if text:
+            print(f"[audio] transcrito: {text[:80]}")
+        else:
+            print(f"[audio] falha na transcrição — ignorando mensagem")
+
     if not (phone and text):
         return {"ok": True}
     if msg_id:
