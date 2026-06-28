@@ -40,6 +40,10 @@ async def webhook(req: Request):
     body = await req.json()
     phone, text, msg_id, reply_to, audio_url = transport.parse_webhook(body)
 
+    # Log temporário: mostra body completo quando chega sem texto (ajuda a mapear áudio)
+    if phone and not text and not audio_url:
+        print(f"[debug:sem-texto] phone={phone} body={body}")
+
     # Áudio sem texto: tenta transcrever antes de continuar
     if phone and not text and audio_url:
         print(f"[audio] {phone}: transcrevendo {audio_url[:80]}")
