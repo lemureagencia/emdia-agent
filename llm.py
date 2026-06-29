@@ -147,7 +147,8 @@ _NUM_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)")
 
 
 def _parse_amount(text: str) -> float | None:
-    m = _NUM_RE.search(text.replace("R$", " "))
+    cleaned = text.replace("R$", " ")
+    m = _NUM_RE.search(cleaned)
     if not m:
         return None
     raw = m.group(1)
@@ -158,9 +159,14 @@ def _parse_amount(text: str) -> float | None:
     elif re.match(r"^\d+\.\d{3}$", raw):  # 2.000 -> milhar
         raw = raw.replace(".", "")
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return None
+    # Multiplicador "mil"/"k" logo após o número: "150 mil" -> 150000, "2k" -> 2000.
+    after = cleaned[m.end():m.end() + 6].lower()
+    if re.match(r"\s*mil\b", after) or re.match(r"\s*k\b", after):
+        value *= 1000
+    return value
 
 
 def _rule_interpret(text: str) -> dict:
@@ -173,14 +179,32 @@ def _rule_interpret(text: str) -> dict:
     if _pagou_m and "?" not in t and not any(k in t for k in ["quem", "quais", "quantos"]):
         return {"action": "editar", "search": _pagou_m.group(1).strip(), "mark_paid": True}
 
-    # "muda o valor de X para Y" / "muda a data de X para Y"
-    if any(k in t for k in ["muda o valor", "muda a data", "altera o valor", "altera a data",
-                              "atualiza o valor", "atualiza a data"]):
-        return {"action": "editar", "search": text.strip()[:80]}
+    # "muda o valor/data DE X PARA Y" → extrai o nome (X) e o novo valor/data (Y)
+    _edit_m = re.search(r'(valor|data|vencimento)\s+d[aeo]?\s*(.+?)\s+(?:para|pra|pro|por)\s+(.+)', t)
+    if _edit_m and any(k in t for k in ["muda", "altera", "atualiza", "troca", "corrige", "ajusta"]):
+        campo, nome, novo = _edit_m.group(1), _edit_m.group(2).strip(), _edit_m.group(3)
+        out: dict = {"action": "editar", "search": nome}
+        if campo == "valor":
+            out["new_amount"] = _parse_amount(novo)
+        else:
+            d = re.search(r'dia\s+(\d{1,2})', novo) or re.search(r'(\d{1,2})', novo)
+            if d:
+                from datetime import date as _date
+                today = _date.today()
+                day = min(int(d.group(1)), 28)
+                mes, ano = today.month, today.year
+                if day <= today.day:
+                    mes = mes + 1
+                    if mes > 12:
+                        mes, ano = 1, ano + 1
+                out["new_due_date"] = f"{ano:04d}-{mes:02d}-{day:02d}"
+        return out
 
-    # "cancela/remove/apaga/exclui X (pendência/conta/cliente)"
-    if any(k in t for k in ["cancela ", "cancele ", "remove ", "apaga ", "exclui "]):
-        return {"action": "excluir", "search": text.strip()[:80]}
+    # "cancela/remove/apaga/exclui X" → tira o verbo e o artigo para limpar a busca
+    _del_m = re.match(r'\s*(cancela|cancele|cancelar|remove|remover|apaga|apagar|exclui|excluir|deleta|deletar)\s+(.+)', t)
+    if _del_m:
+        alvo = re.sub(r'^(a|o|as|os|essa|esse|minha|meu|da|do)\s+', '', _del_m.group(2).strip())
+        return {"action": "excluir", "search": alvo[:60]}
 
     consulta_gate = any(k in t for k in [
         "saldo", "quanto tenho", "quanto devo", "quanto recebi", "quanto entrou",

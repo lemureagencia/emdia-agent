@@ -9,6 +9,127 @@ def _fix_spacing(text: str) -> str:
     """Garante no máximo 1 linha em branco entre blocos (LLMs tendem a usar 2+)."""
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
+
+# ---------------------------------------------------------------- confirmação
+_YES_WORDS = {
+    "sim", "s", "isso", "confirmo", "confirma", "confirmar", "pode", "ok", "okay",
+    "claro", "positivo", "exato", "aham", "yes", "quero", "manda", "bora", "beleza",
+    "blz", "certo", "perfeito", "👍", "✅", "isso mesmo", "pode sim", "com certeza",
+    "pode ser", "vai", "faz", "fazer", "uhum",
+}
+_NO_WORDS = {
+    "nao", "não", "n", "cancela", "cancelar", "cancele", "deixa", "esquece",
+    "negativo", "para", "pare", "nem", "errado", "❌", "deixa pra la", "deixa pra lá",
+    "nao quero", "não quero", "melhor nao", "melhor não",
+}
+
+
+def _norm_reply(text: str) -> str:
+    """Normaliza para casar sim/não: minúsculo, sem pontuação nas bordas."""
+    return re.sub(r'[^\wçãõáéíóúâêô👍✅❌ ]', '', text.strip().lower()).strip()
+
+
+def _is_yes(text: str) -> bool:
+    t = _norm_reply(text)
+    if not t or len(t.split()) > 4:
+        return False
+    return t in _YES_WORDS or t.split()[0] in _YES_WORDS
+
+
+def _is_no(text: str) -> bool:
+    t = _norm_reply(text)
+    if not t or len(t.split()) > 4:
+        return False
+    return t in _NO_WORDS or t.split()[0] in _NO_WORDS
+
+
+def _side_label(type_: str) -> str:
+    return "a receber" if type_ == "income" else "a pagar"
+
+
+def _item_line(item: dict) -> str:
+    """Linha descritiva de uma pendência para confirmar/desambiguar."""
+    nome = (item.get("category") or item.get("description") or "(sem nome)").strip()
+    desc = (item.get("description") or "").strip()
+    detalhe = f" — {desc}" if (item.get("category") and desc) else ""
+    side = _side_label(item.get("type", "income"))
+    venc = "venceu" if item.get("overdue") else "vence"
+    return f"*{nome}*{detalhe} — {_brl(item.get('amount'))} ({side}, {venc} {_fmt_date(item.get('due_date'))})"
+
+
+def _disambig_message(search: str, items: list, verbo: str) -> str:
+    linhas = [f"Encontrei {len(items)} pendências com \"{search}\":", ""]
+    for item in items:
+        linhas.append(f"• {_item_line(item)}")
+    linhas += ["", f"Qual delas você quer {verbo}? Me diga o nome exato ou mais detalhes."]
+    return "\n".join(linhas)
+
+
+def _find_and_pick(phone: str, search: str) -> tuple[dict | None, str | None]:
+    """Resolve uma pendência. Retorna (item, None) se única; (None, msg) se 0 ou >1."""
+    items = emdia.find_pending(phone, search)
+    if not items:
+        return None, f"Não encontrei nenhuma pendência com \"{search}\". Verifique o nome ou a descrição."
+    if len(items) > 1:
+        return None, None  # caller decide a mensagem (precisa do verbo)
+    return items[0], None
+
+
+def _execute_op(phone: str, op: dict | None) -> str:
+    """Executa a ação previamente confirmada (ou a alternativa do 'não')."""
+    if not op:
+        return "Ok, cancelei. 👍"
+    kind = op.get("op")
+
+    if kind == "mark_paid":
+        r = emdia.edit_pending(phone, op["item_id"], mark_paid=True)
+        if not r.get("success"):
+            return "Não consegui dar baixa nessa pendência (talvez já tenha sido alterada)."
+        verbo = "recebido" if op.get("type") == "income" else "pago"
+        return f"✅ *{op.get('display', 'Item')}* marcado como {verbo}. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+
+    if kind == "edit":
+        r = emdia.edit_pending(
+            phone, op["item_id"],
+            amount=op.get("amount"),
+            due_date=op.get("due_date"),
+            description=op.get("description"),
+        )
+        if not r.get("success"):
+            return "Não consegui editar essa pendência (talvez já tenha sido alterada)."
+        changes = []
+        if op.get("amount") is not None:
+            changes.append(f"valor → {_brl(op['amount'])}")
+        if op.get("due_date"):
+            changes.append(f"data → {_fmt_date(op['due_date'])}")
+        if op.get("description"):
+            changes.append(f"descrição → {op['description']}")
+        return f"✅ *{op.get('display', 'Item')}* atualizado: {', '.join(changes)}."
+
+    if kind == "delete":
+        r = emdia.delete_pending(phone, op["item_id"])
+        if not r.get("success"):
+            return "Não consegui excluir essa pendência (talvez já tenha sido alterada)."
+        return f"✅ Pendência *{op.get('display', 'Item')}* excluída."
+
+    if kind == "register":
+        a = op.get("args", {})
+        r = emdia.register(
+            phone=phone, type_=a.get("type", "expense"), amount=float(a.get("amount", 0)),
+            description=a.get("description") or "", category=a.get("category"),
+            payment_method=a.get("payment_method"), status=a.get("status", "paid"),
+            due_date=a.get("due_date"), service_type=a.get("service_type"),
+        )
+        if not r.get("success"):
+            return "Não encontrei seu cadastro. Confirme seu número no EmDia."
+        verbo = "Entrada" if a.get("type") == "income" else "Saída"
+        if a.get("status") == "pending":
+            extra = f" (a {'receber' if a.get('type') == 'income' else 'pagar'})"
+            return f"✅ {verbo} de {_brl(a.get('amount'))} registrada{extra}."
+        return f"✅ {verbo} de {_brl(a.get('amount'))} registrada. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+
+    return "Ok."
+
 _PM_LABEL = {"pix": "Pix", "card": "Cartão", "cash": "Dinheiro"}
 _MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
           "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
@@ -217,6 +338,24 @@ def handle(phone: str, text: str) -> str | None:
     if not s.get("found"):
         return None
 
+    # CONFIRMAÇÃO PENDENTE: se há uma ação aguardando "sim/não", trata aqui antes
+    # de qualquer interpretação (não chama o LLM para um simples sim/não).
+    pending_conf = emdia.get_confirmation(phone)
+    if pending_conf:
+        if _is_yes(text):
+            emdia.clear_confirmation(phone)
+            reply = _execute_op(phone, pending_conf.get("on_yes"))
+            _log(phone, text, reply)
+            return reply
+        if _is_no(text):
+            emdia.clear_confirmation(phone)
+            reply = _execute_op(phone, pending_conf.get("on_no"))
+            _log(phone, text, reply)
+            return reply
+        # Não é sim nem não: abandona a confirmação (seguro: não executa nada
+        # destrutivo) e processa a nova mensagem normalmente.
+        emdia.clear_confirmation(phone)
+
     # Memória curta: histórico ANTES de processar a mensagem atual.
     history = emdia.recent_messages(phone)
     descriptions = emdia.get_descriptions(phone)
@@ -234,11 +373,15 @@ def handle(phone: str, text: str) -> str | None:
 
     if reply:
         reply = _fix_spacing(reply)
-
-    if reply:
-        emdia.log_message(phone, "user", text)
-        emdia.log_message(phone, "assistant", reply)
+        _log(phone, text, reply)
     return reply
+
+
+def _log(phone: str, user_text: str, reply: str) -> None:
+    """Grava o par (pergunta, resposta) na memória da conversa."""
+    if reply:
+        emdia.log_message(phone, "user", user_text)
+        emdia.log_message(phone, "assistant", reply)
 
 
 def _answer_structured(s: dict, action: dict) -> str:
@@ -306,27 +449,17 @@ def _answer_structured(s: dict, action: dict) -> str:
 
 
 def _do_edit(phone: str, action: dict) -> str:
-    """Edita ou marca como pago uma pendência existente."""
+    """Resolve a pendência e PEDE CONFIRMAÇÃO antes de editar/marcar como pago."""
     search = (action.get("search") or "").strip()
     if not search:
         return "Qual pendência você quer editar? Ex.: \"muda o valor da Juliana para 1800\"."
 
-    items = emdia.find_pending(phone, search)
-    if not items:
-        return f"Não encontrei nenhuma pendência com \"{search}\". Verifique o nome ou a descrição."
+    item, err = _find_and_pick(phone, search)
+    if err:
+        return err
+    if item is None:  # múltiplos: pede para especificar
+        return _disambig_message(search, emdia.find_pending(phone, search), "editar")
 
-    if len(items) > 1:
-        linhas = [f"Encontrei {len(items)} pendências com \"{search}\":", ""]
-        for item in items:
-            nome = (item.get("category") or item.get("description") or "(sem nome)").strip()
-            desc = item.get("description", "").strip()
-            detalhe = f" — {desc}" if (item.get("category") and desc) else ""
-            linhas.append(f"• *{nome}*{detalhe} — {_brl(item.get('amount'))} — {_fmt_date(item.get('due_date'))}")
-        linhas += ["", "Qual delas você quer editar? Me fale o nome exato ou mais detalhes."]
-        return "\n".join(linhas)
-
-    item = items[0]
-    item_id = str(item["id"])
     mark_paid = action.get("mark_paid", False)
     new_amount = action.get("new_amount")
     new_due_date = action.get("new_due_date")
@@ -335,62 +468,54 @@ def _do_edit(phone: str, action: dict) -> str:
     if not mark_paid and new_amount is None and new_due_date is None and new_description is None:
         return "O que você quer mudar? Ex.: \"muda o valor da Juliana para 1800\" ou \"muda a data para dia 15\"."
 
-    r = emdia.edit_pending(
-        phone=phone, item_id=item_id,
-        amount=new_amount,
-        due_date=new_due_date,
-        description=new_description,
-        mark_paid=mark_paid,
-    )
-    if not r.get("success"):
-        return "Não consegui editar essa pendência. Tente novamente."
-
+    item_id = str(item["id"])
     nome_display = (item.get("category") or item.get("description") or "item").strip()
-    if mark_paid:
-        tipo = item.get("type", "income")
-        verbo = "recebido" if tipo == "income" else "pago"
-        new_bal = r.get("account_balance", 0)
-        return f"✅ *{nome_display}* marcado como {verbo}. Saldo na conta: {_brl(new_bal)}."
+    tipo = item.get("type", "income")
 
+    if mark_paid:
+        verbo = "recebido" if tipo == "income" else "pago"
+        efeito = "somar no" if tipo == "income" else "subtrair do"
+        emdia.set_confirmation(phone, {
+            "on_yes": {"op": "mark_paid", "item_id": item_id, "type": tipo, "display": nome_display},
+        })
+        return (f"Confirmar baixa: {_item_line(item)}\n\n"
+                f"Vou marcar como {verbo} e {efeito} saldo. Responda *sim* para confirmar ou *não* para cancelar.")
+
+    # Edição de campos (valor/data/descrição)
     changes = []
     if new_amount is not None:
-        changes.append(f"valor → {_brl(new_amount)}")
+        changes.append(f"valor: {_brl(item.get('amount'))} → *{_brl(new_amount)}*")
     if new_due_date:
-        changes.append(f"data → {_fmt_date(new_due_date)}")
+        changes.append(f"data: {_fmt_date(item.get('due_date'))} → *{_fmt_date(new_due_date)}*")
     if new_description:
-        changes.append(f"descrição → {new_description}")
-    return f"✅ *{nome_display}* atualizado: {', '.join(changes)}."
+        changes.append(f"descrição → *{new_description}*")
+    emdia.set_confirmation(phone, {
+        "on_yes": {"op": "edit", "item_id": item_id, "display": nome_display,
+                   "amount": new_amount, "due_date": new_due_date, "description": new_description},
+    })
+    return (f"Confirmar alteração em *{nome_display}*:\n" + "\n".join(f"• {c}" for c in changes) +
+            "\n\nResponda *sim* para confirmar ou *não* para cancelar.")
 
 
 def _do_delete(phone: str, action: dict) -> str:
-    """Exclui uma pendência existente."""
+    """Resolve a pendência e PEDE CONFIRMAÇÃO antes de excluir."""
     search = (action.get("search") or "").strip()
     if not search:
         return "Qual pendência você quer excluir?"
 
-    items = emdia.find_pending(phone, search)
-    if not items:
-        return f"Não encontrei nenhuma pendência com \"{search}\"."
+    item, err = _find_and_pick(phone, search)
+    if err:
+        return err
+    if item is None:  # múltiplos
+        return _disambig_message(search, emdia.find_pending(phone, search), "excluir")
 
-    if len(items) > 1:
-        linhas = [f"Encontrei {len(items)} pendências com \"{search}\":", ""]
-        for item in items:
-            nome = (item.get("category") or item.get("description") or "(sem nome)").strip()
-            desc = item.get("description", "").strip()
-            detalhe = f" — {desc}" if (item.get("category") and desc) else ""
-            linhas.append(f"• *{nome}*{detalhe} — {_brl(item.get('amount'))} — {_fmt_date(item.get('due_date'))}")
-        linhas += ["", "Qual delas você quer excluir? Me fale o nome exato."]
-        return "\n".join(linhas)
-
-    item = items[0]
     item_id = str(item["id"])
     nome_display = (item.get("category") or item.get("description") or "item").strip()
-
-    r = emdia.delete_pending(phone, item_id)
-    if not r.get("success"):
-        return "Não consegui excluir essa pendência. Tente novamente."
-
-    return f"✅ Pendência *{nome_display}* excluída."
+    emdia.set_confirmation(phone, {
+        "on_yes": {"op": "delete", "item_id": item_id, "display": nome_display},
+    })
+    return (f"Confirmar exclusão: {_item_line(item)}\n\n"
+            f"⚠️ Isso apaga a pendência e *não pode ser desfeito*. Responda *sim* para excluir ou *não* para cancelar.")
 
 
 def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
@@ -418,17 +543,39 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
         return "Não entendi o valor. Ex.: \"paguei 150 de luz\" ou \"recebi 2000 do cliente\"."
     type_ = action.get("type", "expense")
     status = action.get("status", "paid")
-    r = emdia.register(
-        phone=phone,
-        type_=type_,
-        amount=float(amount),
-        description=action.get("description") or text[:80],
-        category=action.get("name"),  # nome do cliente -> coluna "Nome" no app
-        payment_method=action.get("payment_method"),
-        status=status,
-        due_date=action.get("due_date"),
-        service_type=action.get("service_type"),
-    )
+    name = action.get("name")
+
+    reg_args = {
+        "type": type_,
+        "amount": float(amount),
+        "description": action.get("description") or text[:80],
+        "category": name,  # nome do cliente -> coluna "Nome" no app
+        "payment_method": action.get("payment_method"),
+        "status": status,
+        "due_date": action.get("due_date"),
+        "service_type": action.get("service_type"),
+    }
+
+    # PONTE DE QUITAÇÃO: ao registrar algo JÁ PAGO em nome de alguém, verifica se
+    # já existe uma pendência aberta do mesmo lado com esse nome. Se existir, em vez
+    # de duplicar, oferece dar baixa nela (evita conta em dobro).
+    if status == "paid" and name:
+        match = _match_open_pending(phone, name, type_, float(amount))
+        if match:
+            emdia.set_confirmation(phone, {
+                "on_yes": {"op": "mark_paid", "item_id": str(match["id"]),
+                           "type": type_, "display": (match.get("category") or name).strip()},
+                "on_no": {"op": "register", "args": reg_args},
+            })
+            verbo_baixa = "recebida" if type_ == "income" else "paga"
+            return (f"Você já tem esta pendência em aberto:\n{_item_line(match)}\n\n"
+                    f"Quer dar baixa nela (marcar como {verbo_baixa})? Responda *sim*.\n"
+                    f"Se for um lançamento novo e separado, responda *não*.")
+
+    r = emdia.register(phone=phone, type_=reg_args["type"], amount=reg_args["amount"],
+                       description=reg_args["description"], category=reg_args["category"],
+                       payment_method=reg_args["payment_method"], status=reg_args["status"],
+                       due_date=reg_args["due_date"], service_type=reg_args["service_type"])
     if not r.get("success"):
         return "Não encontrei seu cadastro. Confirme seu número no EmDia."
     verbo = "Entrada" if type_ == "income" else "Saída"
@@ -436,3 +583,16 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
         extra = f" (a {'receber' if type_ == 'income' else 'pagar'})"
         return f"✅ {verbo} de {_brl(amount)} registrada{extra}."
     return f"✅ {verbo} de {_brl(amount)} registrada. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+
+
+def _match_open_pending(phone: str, name: str, type_: str, amount: float) -> dict | None:
+    """Procura uma pendência aberta do mesmo lado (income/expense) com esse nome.
+    Prioriza valor igual; senão, a de vencimento mais próximo. Retorna None se nenhuma."""
+    candidatos = [i for i in emdia.find_pending(phone, name) if i.get("type") == type_]
+    if not candidatos:
+        return None
+    iguais = [i for i in candidatos if abs(float(i.get("amount", 0)) - amount) < 0.01]
+    if iguais:
+        return iguais[0]
+    # sem valor igual: só oferece baixa se houver UMA pendência (evita escolher errado)
+    return candidatos[0] if len(candidatos) == 1 else None

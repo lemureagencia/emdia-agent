@@ -91,6 +91,31 @@ def delete_pending(phone: str, item_id: str) -> dict:
     return _rpc("agent_delete_pending_by_phone", {"p_phone": phone, "p_id": item_id})
 
 
+def get_confirmation(phone: str) -> dict | None:
+    """Confirmação pendente do número (ação aguardando 'sim/não'). Resiliente a falha."""
+    try:
+        result = _rpc("agent_get_confirmation", {"p_phone": phone})
+        return result if isinstance(result, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def set_confirmation(phone: str, payload: dict) -> None:
+    """Salva a ação a confirmar para este número. Resiliente a falha."""
+    try:
+        _rpc("agent_set_confirmation", {"p_phone": phone, "p_payload": payload})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def clear_confirmation(phone: str) -> None:
+    """Remove a confirmação pendente do número. Resiliente a falha."""
+    try:
+        _rpc("agent_clear_confirmation", {"p_phone": phone})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def log_message(phone: str, role: str, content: str) -> None:
     """Grava uma mensagem (user/assistant) na memória. Resiliente a falha."""
     try:
