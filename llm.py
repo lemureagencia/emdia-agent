@@ -24,7 +24,7 @@ _SYSTEM_BASE = """Você é o assistente financeiro do app EmDia. O usuário fala
 sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um JSON válido \
 (sem texto extra, sem markdown) com o formato:
 
-{{"action": "registrar|consultar|definir_saldo|ajuda",
+{{"action": "registrar|consultar|definir_saldo|editar|excluir|ajuda",
  "type": "income|expense",
  "amount": number,
  "name": "nome do cliente, se houver",
@@ -35,7 +35,12 @@ sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um J
  "due_date": "YYYY-MM-DD",
  "balance": number,
  "consulta": "saldo|entradas|saidas|a_receber|a_pagar|vencidos|lista_vencidos|metas|tudo|lista_receber|lista_pagar",
- "periodo": "mes_atual|proximo_mes|todos"}}
+ "periodo": "mes_atual|proximo_mes|todos",
+ "search": "termo para buscar a pendência (nome do cliente ou descrição) — obrigatório em editar/excluir",
+ "new_amount": number,
+ "new_due_date": "YYYY-MM-DD",
+ "new_description": "nova descrição",
+ "mark_paid": true}}
 
 Conceito importante (NÃO confundir):
 - ENTRADAS / RECEITAS = dinheiro que JÁ entrou (recebido/pago). "quanto recebi", "minhas entradas/receitas do mês", "quanto entrou".
@@ -64,6 +69,17 @@ Regras:
   - Se pedir só o saldo da conta, use "saldo".
 - "periodo": se mencionar "próximo mês"/"mês que vem"/"mês seguinte" => "proximo_mes"; se "este mês"/"mês atual"/"esse mês" => "mes_atual"; se não mencionar tempo, omita (null).
 - "meu saldo é/agora é X", "ajusta meu saldo para X" => action=definir_saldo, balance=X.
+
+EDITAR / EXCLUIR pendências já cadastradas:
+- "X pagou", "X já pagou", "recebi da X", "X me pagou" (sem novo valor) => action=editar, search=X, mark_paid=true. X é o nome do cliente. NÃO confunda com "quem pagou?" (consultar).
+- "marcar X como pago/recebido", "dar baixa em X" => action=editar, search=X, mark_paid=true.
+- "quitei X" ou "paguei X" SEM valor novo (referindo-se a uma conta/despesa pendente) => action=editar, search=X, mark_paid=true.
+- "muda/altera/atualiza o valor de X para Y" => action=editar, search=X, new_amount=Y.
+- "muda/altera/atualiza a data de X para dia Y" => action=editar, search=X, new_due_date=YYYY-MM-DD.
+- "cancela X", "remove X", "apaga X", "exclui X" (referindo-se a pendência) => action=excluir, search=X.
+- ATENÇÃO: "paguei 150 de X" COM VALOR EXPLÍCITO => sempre action=registrar (novo lançamento pago). "X pagou" ou "paguei X" SEM VALOR => action=editar (marcar pendência existente).
+- search deve ser o termo mais específico para identificar a pendência (nome do cliente ou descrição curta). Não invente; use o que o usuário disse.
+
 - forma de pagamento: pix, cartão=card, dinheiro=cash. Se não disser, omita o campo.
 - due_date: se mencionar só o dia (ex.: "dia 15"), use o PRÓXIMO mês em que esse dia ainda não passou, com base na data de hoje. Se não houver data, omita o campo.
 - Use null (não a string "null") para campos sem valor, ou simplesmente omita-os.
@@ -109,14 +125,20 @@ def _sanitize(d: dict) -> dict:
     out = {k: _clean(v) for k, v in d.items()}
     pm = out.get("payment_method")
     out["payment_method"] = pm if pm in _VALID_PM else None
-    dd = out.get("due_date")
-    out["due_date"] = dd if (isinstance(dd, str) and _DATE_RE.match(dd)) else None
-    for num in ("amount", "balance"):
+    for date_field in ("due_date", "new_due_date"):
+        dd = out.get(date_field)
+        out[date_field] = dd if (isinstance(dd, str) and _DATE_RE.match(dd)) else None
+    for num in ("amount", "balance", "new_amount"):
         if out.get(num) is not None:
             try:
                 out[num] = float(out[num])
             except (TypeError, ValueError):
                 out[num] = None
+    # search: string limpa ou None
+    search = out.get("search")
+    out["search"] = search.strip() if isinstance(search, str) and search.strip() else None
+    # mark_paid: bool
+    out["mark_paid"] = bool(out.get("mark_paid"))
     return out
 
 
@@ -144,6 +166,21 @@ def _parse_amount(text: str) -> float | None:
 def _rule_interpret(text: str) -> dict:
     t = text.lower()
     pm = "pix" if "pix" in t else "card" if ("cartao" in t or "cartão" in t) else "cash" if "dinheiro" in t else None
+
+    # Padrões de edição/exclusão (antes do gate de consulta)
+    # "X pagou" = alguém me pagou → marcar pendência de income como paga
+    _pagou_m = re.search(r'^(.+?)\s+(?:já\s+)?pagou\b', t)
+    if _pagou_m and "?" not in t and not any(k in t for k in ["quem", "quais", "quantos"]):
+        return {"action": "editar", "search": _pagou_m.group(1).strip(), "mark_paid": True}
+
+    # "muda o valor de X para Y" / "muda a data de X para Y"
+    if any(k in t for k in ["muda o valor", "muda a data", "altera o valor", "altera a data",
+                              "atualiza o valor", "atualiza a data"]):
+        return {"action": "editar", "search": text.strip()[:80]}
+
+    # "cancela/remove/apaga/exclui X (pendência/conta/cliente)"
+    if any(k in t for k in ["cancela ", "cancele ", "remove ", "apaga ", "exclui "]):
+        return {"action": "excluir", "search": text.strip()[:80]}
 
     consulta_gate = any(k in t for k in [
         "saldo", "quanto tenho", "quanto devo", "quanto recebi", "quanto entrou",

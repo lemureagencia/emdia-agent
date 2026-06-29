@@ -62,6 +62,35 @@ def get_descriptions(phone: str) -> list:
         return []
 
 
+def find_pending(phone: str, search: str) -> list:
+    """Busca pendências por nome ou descrição. Retorna lista (máx 5)."""
+    try:
+        return _rpc("agent_find_pending_by_phone", {"p_phone": phone, "p_search": search}) or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def edit_pending(phone: str, item_id: str, amount: float | None = None,
+                 due_date: str | None = None, description: str | None = None,
+                 category: str | None = None, mark_paid: bool = False) -> dict:
+    """Edita campos de uma pendência ou a marca como paga."""
+    payload: dict = {"p_phone": phone, "p_id": item_id, "p_mark_paid": mark_paid}
+    if amount is not None:
+        payload["p_amount"] = amount
+    if due_date is not None:
+        payload["p_due_date"] = due_date
+    if description is not None:
+        payload["p_description"] = description
+    if category is not None:
+        payload["p_category"] = category
+    return _rpc("agent_edit_pending_by_phone", payload)
+
+
+def delete_pending(phone: str, item_id: str) -> dict:
+    """Exclui uma pendência pelo ID."""
+    return _rpc("agent_delete_pending_by_phone", {"p_phone": phone, "p_id": item_id})
+
+
 def log_message(phone: str, role: str, content: str) -> None:
     """Grava uma mensagem (user/assistant) na memória. Resiliente a falha."""
     try:

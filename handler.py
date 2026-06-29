@@ -223,7 +223,7 @@ def handle(phone: str, text: str) -> str | None:
     action = llm.interpret(text, history, descriptions)
     a = action.get("action")
 
-    if a in ("registrar", "definir_saldo"):
+    if a in ("registrar", "definir_saldo", "editar", "excluir"):
         # Escrita: caminho estruturado e seguro (valores exatos, sem alucinação).
         reply = _do_action(phone, text, action, s)
     else:
@@ -305,9 +305,103 @@ def _answer_structured(s: dict, action: dict) -> str:
     )
 
 
+def _do_edit(phone: str, action: dict) -> str:
+    """Edita ou marca como pago uma pendência existente."""
+    search = (action.get("search") or "").strip()
+    if not search:
+        return "Qual pendência você quer editar? Ex.: \"muda o valor da Juliana para 1800\"."
+
+    items = emdia.find_pending(phone, search)
+    if not items:
+        return f"Não encontrei nenhuma pendência com \"{search}\". Verifique o nome ou a descrição."
+
+    if len(items) > 1:
+        linhas = [f"Encontrei {len(items)} pendências com \"{search}\":", ""]
+        for item in items:
+            nome = (item.get("category") or item.get("description") or "(sem nome)").strip()
+            desc = item.get("description", "").strip()
+            detalhe = f" — {desc}" if (item.get("category") and desc) else ""
+            linhas.append(f"• *{nome}*{detalhe} — {_brl(item.get('amount'))} — {_fmt_date(item.get('due_date'))}")
+        linhas += ["", "Qual delas você quer editar? Me fale o nome exato ou mais detalhes."]
+        return "\n".join(linhas)
+
+    item = items[0]
+    item_id = str(item["id"])
+    mark_paid = action.get("mark_paid", False)
+    new_amount = action.get("new_amount")
+    new_due_date = action.get("new_due_date")
+    new_description = action.get("new_description")
+
+    if not mark_paid and new_amount is None and new_due_date is None and new_description is None:
+        return "O que você quer mudar? Ex.: \"muda o valor da Juliana para 1800\" ou \"muda a data para dia 15\"."
+
+    r = emdia.edit_pending(
+        phone=phone, item_id=item_id,
+        amount=new_amount,
+        due_date=new_due_date,
+        description=new_description,
+        mark_paid=mark_paid,
+    )
+    if not r.get("success"):
+        return "Não consegui editar essa pendência. Tente novamente."
+
+    nome_display = (item.get("category") or item.get("description") or "item").strip()
+    if mark_paid:
+        tipo = item.get("type", "income")
+        verbo = "recebido" if tipo == "income" else "pago"
+        new_bal = r.get("account_balance", 0)
+        return f"✅ *{nome_display}* marcado como {verbo}. Saldo na conta: {_brl(new_bal)}."
+
+    changes = []
+    if new_amount is not None:
+        changes.append(f"valor → {_brl(new_amount)}")
+    if new_due_date:
+        changes.append(f"data → {_fmt_date(new_due_date)}")
+    if new_description:
+        changes.append(f"descrição → {new_description}")
+    return f"✅ *{nome_display}* atualizado: {', '.join(changes)}."
+
+
+def _do_delete(phone: str, action: dict) -> str:
+    """Exclui uma pendência existente."""
+    search = (action.get("search") or "").strip()
+    if not search:
+        return "Qual pendência você quer excluir?"
+
+    items = emdia.find_pending(phone, search)
+    if not items:
+        return f"Não encontrei nenhuma pendência com \"{search}\"."
+
+    if len(items) > 1:
+        linhas = [f"Encontrei {len(items)} pendências com \"{search}\":", ""]
+        for item in items:
+            nome = (item.get("category") or item.get("description") or "(sem nome)").strip()
+            desc = item.get("description", "").strip()
+            detalhe = f" — {desc}" if (item.get("category") and desc) else ""
+            linhas.append(f"• *{nome}*{detalhe} — {_brl(item.get('amount'))} — {_fmt_date(item.get('due_date'))}")
+        linhas += ["", "Qual delas você quer excluir? Me fale o nome exato."]
+        return "\n".join(linhas)
+
+    item = items[0]
+    item_id = str(item["id"])
+    nome_display = (item.get("category") or item.get("description") or "item").strip()
+
+    r = emdia.delete_pending(phone, item_id)
+    if not r.get("success"):
+        return "Não consegui excluir essa pendência. Tente novamente."
+
+    return f"✅ Pendência *{nome_display}* excluída."
+
+
 def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
-    """Escritas: registrar transação e definir saldo (caminho estruturado e seguro)."""
+    """Escritas: registrar, definir saldo, editar e excluir pendências."""
     a = action.get("action")
+
+    if a == "editar":
+        return _do_edit(phone, action)
+
+    if a == "excluir":
+        return _do_delete(phone, action)
 
     if a == "definir_saldo":
         bal = action.get("balance")
