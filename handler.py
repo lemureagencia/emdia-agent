@@ -86,7 +86,10 @@ def _execute_op(phone: str, op: dict | None) -> str:
         if not r.get("success"):
             return "Não consegui dar baixa nessa pendência (talvez já tenha sido alterada)."
         verbo = "recebido" if op.get("type") == "income" else "pago"
-        return f"✅ *{op.get('display', 'Item')}* marcado como {verbo}. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+        msg = f"✅ *{op.get('display', 'Item')}* marcado como {verbo}. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+        if op.get("type") == "expense":
+            msg += _budget_notice(phone)  # dar baixa numa conta = saída paga; checa o teto
+        return msg
 
     if kind == "edit":
         r = emdia.edit_pending(
@@ -261,6 +264,33 @@ def _brl(v) -> str:
         return "R$ 0,00"
 
 
+def _budget_line(budget: float, spent: float) -> str:
+    """Linha do controle de gastos: quanto já usou do teto do mês."""
+    restante = budget - spent
+    mes = _month_name(0)
+    if restante < 0:
+        return (f"⚠️ *Controle de gastos ({mes})*: você passou do limite!\n"
+                f"Já usou {_brl(spent)} de {_brl(budget)} — *{_brl(abs(restante))} acima do teto*.")
+    pct = int(round((spent / budget) * 100)) if budget > 0 else 0
+    alerta = " ⚠️ perto do limite!" if pct >= 80 else ""
+    return (f"📊 *Controle de gastos ({mes})*: já usou {_brl(spent)} de {_brl(budget)} "
+            f"({pct}%). Resta *{_brl(restante)}*.{alerta}")
+
+
+def _budget_notice(phone: str) -> str:
+    """Após uma saída paga, retorna a linha do controle de gastos (ou '' se sem teto).
+    Busca um resumo fresco para pegar o gasto do mês já atualizado."""
+    try:
+        s = emdia.get_summary(phone)
+    except Exception:  # noqa: BLE001
+        return ""
+    budget = s.get("monthly_budget")
+    if not budget or float(budget) <= 0:
+        return ""
+    spent = float((s.get("finance") or {}).get("paid_month", 0))
+    return "\n\n" + _budget_line(float(budget), spent)
+
+
 def _format_summary(s: dict) -> str:
     fin = s.get("finance", {}) or {}
     nome = (s.get("name") or "").strip()
@@ -303,6 +333,11 @@ def _snapshot_text(s: dict) -> str:
         f"Total geral a pagar (todas as pendências): {_brl(fin.get('expense_pending', 0))}",
         f"Total vencido/em atraso: {_brl(venc_total)} ({fin.get('overdue_count', 0)} item(ns))",
     ]
+    budget = s.get("monthly_budget")
+    if budget and float(budget) > 0:
+        gasto = float(fin.get("paid_month", 0))
+        L.append(f"Controle de gastos do mês (teto): {_brl(float(budget))} · já gasto (saídas pagas): "
+                 f"{_brl(gasto)} · resta {_brl(float(budget) - gasto)}")
 
     def _itens(grupo: list) -> list:
         grupo = sorted(grupo, key=lambda x: x.get("due_date") or "9999")[:40]
@@ -362,7 +397,7 @@ def handle(phone: str, text: str) -> str | None:
     action = llm.interpret(text, history, descriptions)
     a = action.get("action")
 
-    if a in ("registrar", "definir_saldo", "editar", "excluir"):
+    if a in ("registrar", "definir_saldo", "definir_orcamento", "editar", "excluir"):
         # Escrita: caminho estruturado e seguro (valores exatos, sem alucinação).
         reply = _do_action(phone, text, action, s)
     else:
@@ -428,6 +463,13 @@ def _answer_structured(s: dict, action: dict) -> str:
         if consulta == "vencidos":
             total_venc = float(fin.get("income_overdue", 0)) + float(fin.get("expense_overdue", 0))
             return f"⚠️ Vencidos: *{_brl(total_venc)}* ({fin.get('overdue_count', 0)} em atraso)"
+        if consulta == "orcamento":
+            budget = s.get("monthly_budget")
+            if not budget or float(budget) <= 0:
+                return ("Você ainda não tem um controle de gastos definido. "
+                        "Ex.: \"define um controle de gastos de 3000\".")
+            spent = float(fin.get("paid_month", 0))
+            return _budget_line(float(budget), spent)
         if consulta == "metas":
             goals = s.get("goals") or []
             if not goals:
@@ -537,6 +579,23 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
             return "Não encontrei seu cadastro para atualizar o saldo."
         return f"✅ Saldo na conta atualizado para {_brl(r['account_balance'])}."
 
+    if a == "definir_orcamento":
+        if action.get("remove_budget"):
+            r = emdia.set_budget(phone, None)
+            if not r.get("success"):
+                return "Não encontrei seu cadastro para remover o controle de gastos."
+            return "✅ Controle de gastos removido. Você não terá mais avisos de limite."
+        budget = action.get("budget")
+        if budget is None or float(budget) <= 0:
+            return ("Qual valor de controle de gastos você quer para o mês? "
+                    "Ex.: \"define um controle de gastos de 3000\".")
+        r = emdia.set_budget(phone, float(budget))
+        if not r.get("success"):
+            return "Não encontrei seu cadastro para definir o controle de gastos."
+        spent = float((s.get("finance") or {}).get("paid_month", 0))
+        return (f"✅ Controle de gastos definido: *{_brl(budget)}* por mês.\n"
+                + _budget_line(float(budget), spent))
+
     # a == "registrar"
     amount = action.get("amount")
     if not amount:
@@ -582,7 +641,10 @@ def _do_action(phone: str, text: str, action: dict, s: dict) -> str | None:
     if status == "pending":
         extra = f" (a {'receber' if type_ == 'income' else 'pagar'})"
         return f"✅ {verbo} de {_brl(amount)} registrada{extra}."
-    return f"✅ {verbo} de {_brl(amount)} registrada. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+    msg = f"✅ {verbo} de {_brl(amount)} registrada. Saldo na conta: {_brl(r.get('account_balance', 0))}."
+    if type_ == "expense":
+        msg += _budget_notice(phone)  # aviso de controle de gastos, se houver teto
+    return msg
 
 
 def _match_open_pending(phone: str, name: str, type_: str, amount: float) -> dict | None:

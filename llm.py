@@ -24,7 +24,7 @@ _SYSTEM_BASE = """Você é o assistente financeiro do app EmDia. O usuário fala
 sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um JSON válido \
 (sem texto extra, sem markdown) com o formato:
 
-{{"action": "registrar|consultar|definir_saldo|editar|excluir|ajuda",
+{{"action": "registrar|consultar|definir_saldo|definir_orcamento|editar|excluir|ajuda",
  "type": "income|expense",
  "amount": number,
  "name": "nome do cliente, se houver",
@@ -34,7 +34,9 @@ sobre dinheiro. Hoje é {hoje}. Interprete a mensagem e responda APENAS com um J
  "payment_method": "pix|card|cash",
  "due_date": "YYYY-MM-DD",
  "balance": number,
- "consulta": "saldo|entradas|saidas|a_receber|a_pagar|vencidos|lista_vencidos|metas|tudo|lista_receber|lista_pagar",
+ "budget": number,
+ "remove_budget": true,
+ "consulta": "saldo|entradas|saidas|a_receber|a_pagar|vencidos|lista_vencidos|metas|orcamento|tudo|lista_receber|lista_pagar",
  "periodo": "mes_atual|proximo_mes|todos",
  "search": "termo para buscar a pendência (nome do cliente ou descrição) — obrigatório em editar/excluir",
  "new_amount": number,
@@ -69,6 +71,12 @@ Regras:
   - Se pedir só o saldo da conta, use "saldo".
 - "periodo": se mencionar "próximo mês"/"mês que vem"/"mês seguinte" => "proximo_mes"; se "este mês"/"mês atual"/"esse mês" => "mes_atual"; se não mencionar tempo, omita (null).
 - "meu saldo é/agora é X", "ajusta meu saldo para X" => action=definir_saldo, balance=X.
+
+CONTROLE DE GASTOS (orçamento mensal):
+- "define um controle de gastos de X", "meu limite de gastos é X", "orçamento do mês é X", "quero gastar no máximo X esse mês", "teto de gastos X" => action=definir_orcamento, budget=X.
+- "remove/tira/desativa o controle de gastos", "sem limite de gastos" => action=definir_orcamento, remove_budget=true.
+- "qual meu controle de gastos", "quanto já gastei do limite", "como está meu orçamento" => action=consultar, consulta=orcamento.
+- NÃO confunda: "define orçamento" é o teto do mês (definir_orcamento). "meu saldo é X" é o dinheiro na conta (definir_saldo). São coisas diferentes.
 
 EDITAR / EXCLUIR pendências já cadastradas:
 - "X pagou", "X já pagou", "recebi da X", "X me pagou" (sem novo valor) => action=editar, search=X, mark_paid=true. X é o nome do cliente. NÃO confunda com "quem pagou?" (consultar).
@@ -128,7 +136,7 @@ def _sanitize(d: dict) -> dict:
     for date_field in ("due_date", "new_due_date"):
         dd = out.get(date_field)
         out[date_field] = dd if (isinstance(dd, str) and _DATE_RE.match(dd)) else None
-    for num in ("amount", "balance", "new_amount"):
+    for num in ("amount", "balance", "new_amount", "budget"):
         if out.get(num) is not None:
             try:
                 out[num] = float(out[num])
@@ -137,8 +145,9 @@ def _sanitize(d: dict) -> dict:
     # search: string limpa ou None
     search = out.get("search")
     out["search"] = search.strip() if isinstance(search, str) and search.strip() else None
-    # mark_paid: bool
+    # flags booleanas
     out["mark_paid"] = bool(out.get("mark_paid"))
+    out["remove_budget"] = bool(out.get("remove_budget"))
     return out
 
 
@@ -172,6 +181,16 @@ def _parse_amount(text: str) -> float | None:
 def _rule_interpret(text: str) -> dict:
     t = text.lower()
     pm = "pix" if "pix" in t else "card" if ("cartao" in t or "cartão" in t) else "cash" if "dinheiro" in t else None
+
+    # Controle de gastos (orçamento) — antes do gate de consulta
+    if any(k in t for k in ["controle de gasto", "limite de gasto", "teto de gasto", "orçamento", "orcamento"]):
+        if any(k in t for k in ["remove", "remover", "tira", "tirar", "desativa", "desativar", "sem limite", "sem controle"]):
+            return {"action": "definir_orcamento", "remove_budget": True}
+        b = _parse_amount(t)
+        if b is not None and any(k in t for k in ["defin", "meu ", "é ", "e ", "de ", "quero", "coloca", "ajusta", "seja", "para"]):
+            return {"action": "definir_orcamento", "budget": b}
+        # sem valor → é uma consulta ("qual meu controle de gastos?")
+        return {"action": "consultar", "consulta": "orcamento", "periodo": None}
 
     # Padrões de edição/exclusão (antes do gate de consulta)
     # "X pagou" = alguém me pagou → marcar pendência de income como paga

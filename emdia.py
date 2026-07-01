@@ -41,6 +41,11 @@ def set_balance(phone: str, balance: float) -> dict:
     return _rpc("agent_set_balance_by_phone", {"p_phone": phone, "p_balance": balance})
 
 
+def set_budget(phone: str, budget: float | None) -> dict:
+    """Define/remove (None) o controle de gastos mensal."""
+    return _rpc("agent_set_budget_by_phone", {"p_phone": phone, "p_budget": budget})
+
+
 def recent_messages(phone: str, limit: int = 8) -> list:
     """Últimas mensagens da conversa (ordem cronológica). Resiliente a falha."""
     try:
